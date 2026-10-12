@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);box-sizing:border-box;height:100%}</style>
+</head><body>
+<title>Dig Runner</title>
+<style>
+/* Layout: arcade screen — status strip on top, the 20x14 playfield canvas, then d-pad left and dig buttons right. Single committed look: night mine shaft. */
+:root{
+  --bg:#0e0b14;        /* deep mine */
+  --panel:#1b1626;
+  --line:#352b48;
+  --ink:#f5efe2;
+  --muted:#a89cb8;
+  --gold:#ffc83d;
+  --brick:#b5532f;
+  --runner:#5ad1ff;
+  --guard:#ff5d6c;
+  --display:"Silkscreen", "Courier New", monospace;
+  --body:"Karla", system-ui, -apple-system, sans-serif;
+  color-scheme:dark;
+}
+[hidden]{display:none!important}
+html,body{height:100%;margin:0;overflow:hidden;overscroll-behavior:none}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);-webkit-user-select:none;user-select:none;touch-action:none;-webkit-tap-highlight-color:transparent}
+.app{height:100%;display:flex;flex-direction:column;gap:8px;padding-block:10px;padding-inline:16px;box-sizing:border-box;max-width:640px;margin:0 auto}
+header{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+h1{font-family:var(--display);font-weight:700;font-size:1.25rem;margin:0;color:var(--gold);letter-spacing:.04em}
+.ver{font-family:var(--body);font-size:.6rem;font-weight:500;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:1px 5px;margin-left:6px;vertical-align:middle;letter-spacing:0}
+.hud{display:flex;gap:12px;font-size:.78rem;color:var(--muted);font-variant-numeric:tabular-nums}
+.hud b{color:var(--ink);font-size:.95rem}
+.stage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative}
+canvas{display:block;border-radius:6px;box-shadow:0 0 0 3px var(--line),0 14px 34px rgba(0,0,0,.6)}
+.sheet{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
+.card{background:rgba(14,11,20,.94);border:1px solid var(--line);border-radius:14px;padding:20px;max-width:320px;width:100%;box-sizing:border-box;display:flex;flex-direction:column;gap:12px;text-align:center}
+.card h2{font-family:var(--display);font-size:1.6rem;margin:0;color:var(--gold)}
+.card p{margin:0;color:var(--muted);line-height:1.45;font-size:.9rem;text-align:left}
+.card .big{font-family:var(--display);color:var(--ink);text-align:center}
+button{font:700 1rem var(--body);border:0;border-radius:12px;cursor:pointer;touch-action:manipulation}
+button.primary{background:var(--gold);color:#2a1d00;padding:13px;font-family:var(--display)}
+button:focus-visible{outline:3px solid var(--ink);outline-offset:2px}
+.controls{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.pad{display:grid;grid-template-columns:repeat(3,54px);grid-template-rows:repeat(3,46px);gap:4px}
+.pad button,.digs button{background:var(--panel);color:var(--ink);border:1px solid var(--line);font-size:1.2rem}
+.pad button.on,.digs button.on{background:var(--line)}
+.pad .u{grid-column:2;grid-row:1}.pad .l{grid-column:1;grid-row:2}.pad .r{grid-column:3;grid-row:2}.pad .d{grid-column:2;grid-row:3}
+.digs{display:flex;gap:8px}
+.digs button{width:70px;height:70px;border-radius:50%;font-family:var(--display);font-size:.8rem;color:var(--gold);border-color:#5a4520}
+.pad,.pad button,.digs button,.speed button{touch-action:none}
+.bottom{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.speed{display:flex;align-items:center;gap:6px}
+.speed button{width:40px;height:36px;background:var(--panel);color:var(--ink);border:1px solid var(--line);font-size:1.2rem}
+.speed button.on{background:var(--line)}
+.speed span{display:flex;flex-direction:column;align-items:center;min-width:52px}
+.speed small{font-size:.6rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.speed b{font-family:var(--display);font-size:.9rem;font-variant-numeric:tabular-nums}
+.hint{font-size:.7rem;color:var(--muted);text-align:right;min-width:0}
+</style>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=Karla:wght@400;500;700&display=swap">
+
+<div class="app">
+  <header>
+    <h1>Dig Runner<span class="ver">v1.2</span></h1>
+    <div class="hud">
+      <span>Lvl <b id="lvl">1</b></span>
+      <span>Gold <b id="gold">0</b></span>
+      <span>Score <b id="score">0</b></span>
+      <span>Lives <b id="lives">5</b></span>
+    </div>
+  </header>
+  <div class="stage" id="stage">
+    <canvas id="c" aria-label="Game board"></canvas>
+    <div class="sheet" id="sheet">
+      <div class="card">
+        <h2 id="sheetTitle">Dig Runner</h2>
+        <p id="sheetText">Grab every pile of gold while the guards chase you. Dig holes in the brick to trap them, but holes fill back in. Once the gold is gone, an escape ladder appears: climb it off the top of the screen.</p>
+        <p class="big" id="sheetScore" hidden></p>
+        <button class="primary" id="startBtn">Play</button>
+      </div>
+    </div>
+  </div>
+  <div class="controls">
+    <div class="pad">
+      <button class="u" data-d="up" aria-label="Up">▲</button>
+      <button class="l" data-d="left" aria-label="Left">◀</button>
+      <button class="r" data-d="right" aria-label="Right">▶</button>
+      <button class="d" data-d="down" aria-label="Down">▼</button>
+    </div>
+    <div class="digs">
+      <button id="digL" aria-label="Dig left">◣ DIG</button>
+      <button id="digR" aria-label="Dig right">DIG ◢</button>
+    </div>
+  </div>
+  <div class="bottom">
+    <div class="speed">
+      <button id="spdDn" aria-label="Slower">−</button>
+      <span><small>Speed</small><b id="spd">0.5×</b></span>
+      <button id="spdUp" aria-label="Faster">+</button>
+    </div>
+    <div class="hint">Keys: arrows, Z / X to dig, − / + speed</div>
+  </div>
+</div>
+
+<script>
+(() => {
+// ---------- levels: # brick (diggable) @ stone H ladder - bar S escape ladder $ gold P runner E guard ----------
+const LEVELS = [
+[
+"S...................",
+"S......$............",
+"S...#######H........",
+"S..........H....$...",
+"###H#######H####H###",
+"...H.......H....H...",
+"...H.......H----H...",
+"...H..$.E..H....H..$",
+"#######H###H###H####",
+".......H...H...H....",
+".......H...H...H....",
+".P$....H...H...H..$.",
+"####################",
+"@@@@@@@@@@@@@@@@@@@@"],
+[
+"..........S.........",
+".$........S......$..",
+"####H#####S####H####",
+"....H.....H....H....",
+"....H.....H....H....",
+".E..H-----H----H..E.",
+"....H..$..H.....$...",
+"#####H####H###H#####",
+".....H....H...H.....",
+".$...H....H...H...$.",
+"#H####....H....####H",
+".H.....E..H.........",
+".H.P......H......$..",
+"@@@@@@@@@@@@@@@@@@@@"],
+[
+"...............S....",
+"$..E...........S...$",
+"@@@#####H######H#@@@",
+"........H......H....",
+"..$.....H......H..$.",
+"####H###H@@####H####",
+"....H---H------H....",
+"..$.H...H......H.E..",
+"######..H..####H####",
+"........H......H....",
+"..$.....H...$..H..$.",
+"####H####..####H####",
+"..P.H.....$....H....",
+"@@@@@@@@@@@@@@@@@@@@"],
+[
+"S..................S",
+"S.$......E.......$.S",
+"S#####H......H#####S",
+"S.....H......H.....S",
+"##H###H-------H###H#",
+"..H...H.......H...H.",
+"..H.$.H..$E...H.$.H.",
+"##H####H####H####H##",
+"..H....H....H....H..",
+"..H.$..H....H..$.H..",
+"#####..H....H..#####",
+"...E...H....H.......",
+".$....PH.$..H....$..",
+"@@@@@@@@@@@@@@@@@@@@"]
+];
+const COLS=20, ROWS=14;
+
+const $=id=>document.getElementById(id);
+const cv=$('c'), ctx=cv.getContext('2d');
+let cell=24, W=0, H=0;
+const store={get(k,d){try{const v=localStorage.getItem('digrunner.'+k);return v==null?d:JSON.parse(v)}catch(e){return d}},set(k,v){try{localStorage.setItem('digrunner.'+k,JSON.stringify(v))}catch(e){}}};
+
+// ---------- state ----------
+let map, holes, gold, escapeShown, runner, guards, levelIdx=0, loop=0, score=0, lives=5, state='menu', deathT=0, clearT=0, clock=0;
+let held={up:0,down:0,left:0,right:0}, digQueued=null, pendingDir=null;
+// game speed: scales everything (runner, guards, holes)
+const SPEEDS=[0.3,0.4,0.5,0.65,0.8,1,1.2,1.45,1.75,2.1];
+const DEFAULT_SPEED=2;   // starts at half speed
+let speedIdx=Math.min(SPEEDS.length-1,Math.max(0,(function(){try{const v=JSON.parse(localStorage.getItem('digrunner.speed2'));return Number.isInteger(v)?v:DEFAULT_SPEED}catch(e){return DEFAULT_SPEED}})()));
+
+function loadLevel(){
+  const L=LEVELS[levelIdx];
+  map=[]; holes=[]; gold=0; escapeShown=false; guards=[];
+  for(let y=0;y<ROWS;y++){ map.push([]); for(let x=0;x<COLS;x++){
+    let ch=L[y][x]||'.';
+    if(ch==='P'){ runner=mkEnt(x,y); ch='.'; }
+    else if(ch==='E'){ const g=mkEnt(x,y); g.home={x,y}; guards.push(g); ch='.'; }
+    else if(ch==='$') gold++;
+    map[y].push(ch);
+  }}
+  hud();
+}
+function mkEnt(x,y){ return {x,y,px:x,py:y,t:1,dur:.13,face:1,trapped:0,anim:0,climbOut:false,digT:0}; }
+
+const speedGuard=()=>Math.max(.17, .26 - levelIdx*.012 - loop*.03);
+
+// ---------- map helpers ----------
+const inB=(x,y)=>x>=0&&x<COLS&&y>=0&&y<ROWS;
+const tile=(x,y)=>inB(x,y)?map[y][x]:'@';
+const holeAt=(x,y)=>holes.find(h=>h.x===x&&h.y===y);
+function isLadder(x,y){ const t=tile(x,y); return t==='H' || (t==='S'&&escapeShown); }
+function isBar(x,y){ return tile(x,y)==='-'; }
+function solid(x,y){ // blocks movement
+  if(!inB(x,y)) return y>=ROWS || x<0 || x>=COLS;
+  const t=map[y][x];
+  if(t==='@') return true;
+  if(t==='#') return !holeAt(x,y) || holeAt(x,y).fill>0.5;
+  return false;
+}
+function guardAt(x,y,except){ return guards.find(g=>g!==except && g.x===x && g.y===y); }
+function supported(x,y,ent){
+  if(isLadder(x,y) || isBar(x,y)) return true;
+  if(y+1>=ROWS) return true;
+  if(solid(x,y+1) || isLadder(x,y+1)) return true;
+  const g=guardAt(x,y+1,ent); if(g) return true;          // you can stand on a guard's head
+  return false;
+}
+
+// ---------- movement ----------
+function canMove(ent,dir){
+  const {x,y}=ent;
+  if(dir==='left')  return !solid(x-1,y) && x>0;
+  if(dir==='right') return !solid(x+1,y) && x<COLS-1;
+  if(dir==='up')    return isLadder(x,y) && !solid(x,y-1) && (y>0 || ent===runner);
+  if(dir==='down')  return !solid(x,y+1) && y<ROWS-1 && (isLadder(x,y+1) || isLadder(x,y) || isBar(x,y) || !supported(x,y,ent));
+  return false;
+}
+function step(ent,dx,dy,dur){
+  ent.px=ent.x; ent.py=ent.y; ent.x+=dx; ent.y+=dy; ent.t=0; ent.dur=dur;
+  if(dx) ent.face=dx;
+}
+
+// ---------- digging ----------
+function dig(side){
+  if(state!=='play' || runner.t<1) return;
+  const {x,y}=runner;
+  if(!supported(x,y,runner) || isBar(x,y) && !solid(x,y+1) && !isLadder(x,y+1)) return;
+  const tx=x+side, ty=y+1;
+  if(!inB(tx,ty) || map[ty][tx]!=='#' || holeAt(tx,ty)) return;
+  if(solid(tx,y) || isLadder(tx,y) || isBar(tx,y) || tile(tx,y)==='$' || guardAt(tx,y)) return; // need open space above
+  holes.push({x:tx,y:ty,t:0,fill:0});
+  runner.face=side; runner.digT=.25;
+}
+
+// ---------- guard AI: shortest route to the runner ----------
+function neighbours(x,y,g){
+  const ent={x,y}; const out=[];
+  if(!supported(x,y,g) && !holeTrap(x,y)){ if(!solid(x,y+1)) out.push([x,y+1,'down']); return out; }
+  for(const d of ['left','right','up','down']){
+    if(!canMove({x,y},d)) continue;
+    const nx=x+(d==='left'?-1:d==='right'?1:0), ny=y+(d==='up'?-1:d==='down'?1:0);
+    out.push([nx,ny,d]);
+  }
+  return out;
+}
+const holeTrap=(x,y)=>{ const h=holeAt(x,y); return h && h.fill===0; };
+function guardDir(g){
+  const start=g.x+','+g.y, goal=runner.x+','+runner.y;
+  const prev=new Map([[start,null]]); const q=[[g.x,g.y]];
+  let found=null, nearest=null, bestD=1e9;
+  for(let i=0;i<q.length && i<600;i++){
+    const [x,y]=q[i]; const k=x+','+y;
+    const d=Math.abs(x-runner.x)*1+Math.abs(y-runner.y)*3;
+    if(d<bestD){ bestD=d; nearest=k; }
+    if(k===goal){ found=k; break; }
+    for(const [nx,ny,dir] of neighbours(x,y,g)){
+      const nk=nx+','+ny; if(prev.has(nk)) continue;
+      prev.set(nk,{k,dir}); q.push([nx,ny]);
+    }
+  }
+  const k=found||nearest; if(!k||k===start) return null;
+  // walk back to the first step taken from the guard's square
+  let cur=k;
+  while(prev.get(cur) && prev.get(cur).k!==start) cur=prev.get(cur).k;
+  const first=prev.get(cur); return first?first.dir:null;
+}
+
+// ---------- update ----------
+function update(dt){
+  clock+=dt;
+  if(state==='dying'){ deathT-=dt; if(deathT<=0) afterDeath(); return; }
+  if(state==='clear'){ clearT-=dt; if(clearT<=0) nextLevel(); return; }
+  if(state!=='play') return;
+
+  // holes: open for a while, then fill back in
+  for(const h of holes){
+    h.t+=dt;
+    if(h.t>6) h.fill=Math.min(1,(h.t-6)/0.5);
+    if(h.fill>=1){
+      if(runner.x===h.x && runner.y===h.y){ die(); return; }
+      for(const g of guards) if(g.x===h.x && g.y===h.y){ respawnGuard(g); score+=75; }
+    }
+  }
+  holes=holes.filter(h=>h.fill<1);
+
+  // runner
+  if(runner.digT>0) runner.digT-=dt;
+  if(runner.t<1) runner.t=Math.min(1,runner.t+dt/runner.dur);
+  if(runner.t>=1){
+    if(tile(runner.x,runner.y)==='$'){ map[runner.y][runner.x]='.'; gold--; score+=250; hud(); if(gold===0) revealEscape(); }
+    if(runner.y===0 && escapeShown && isLadder(runner.x,runner.y) && held.up){ levelClear(); return; }
+    if(runner.y===0 && escapeShown && gold===0 && tile(runner.x,0)==='S'){ /* keep climbing */ }
+    if(!supported(runner.x,runner.y,runner)) step(runner,0,1,.1);
+    else if(!(runner.digT>0)){
+      const dir = held.left?'left':held.right?'right':held.up?'up':held.down?'down':pendingDir;
+      pendingDir=null;
+      if(dir && canMove(runner,dir)) step(runner, dir==='left'?-1:dir==='right'?1:0, dir==='up'?-1:dir==='down'?1:0, .13);
+      else if(dir==='up' && runner.y===0 && escapeShown && isLadder(runner.x,0)) { levelClear(); return; }
+    }
+  }
+
+  // guards
+  for(const g of guards){
+    if(g.t<1){ g.t=Math.min(1,g.t+dt/g.dur); continue; }
+    const h=holeAt(g.x,g.y);
+    if(h && h.fill===0){
+      if(!g.trapped){ g.trapped=2.4; score+=75; hud(); }
+      g.trapped-=dt;
+      if(g.trapped<=0 && !solid(g.x,g.y-1) && !guardAt(g.x,g.y-1,g)){ step(g,0,-1,.3); g.climbOut=true; }
+      continue;
+    }
+    g.trapped=0;
+    if(g.climbOut){ // step sideways off the hole edge
+      g.climbOut=false;
+      const side = runner.x>=g.x?1:-1;
+      if(!solid(g.x+side,g.y) && !guardAt(g.x+side,g.y,g)) { step(g,side,0,speedGuard()); continue; }
+    }
+    if(!supported(g.x,g.y,g)){ if(!guardAt(g.x,g.y+1,g)) step(g,0,1,.12); continue; }
+    const d=guardDir(g);
+    if(!d) continue;
+    const nx=g.x+(d==='left'?-1:d==='right'?1:0), ny=g.y+(d==='up'?-1:d==='down'?1:0);
+    if(guardAt(nx,ny,g)) continue;
+    step(g,nx-g.x,ny-g.y,speedGuard());
+  }
+
+  // touching a guard ends this life (standing on a trapped guard's head is safe)
+  const rx=runner.px+(runner.x-runner.px)*runner.t, ry=runner.py+(runner.y-runner.py)*runner.t;
+  for(const g of guards){
+    const gx=g.px+(g.x-g.px)*g.t, gy=g.py+(g.y-g.py)*g.t;
+    if(Math.abs(gx-rx)<0.6 && Math.abs(gy-ry)<0.6){ die(); return; }
+  }
+}
+function respawnGuard(g){
+  const spots=[]; for(let x=0;x<COLS;x++) for(let y=0;y<3;y++) if(!solid(x,y)&&!isLadder(x,y)&&map[y][x]!=='S'&&!guardAt(x,y)) spots.push([x,y]);
+  const [x,y]=spots[Math.random()*spots.length|0]||[g.home.x,g.home.y];
+  Object.assign(g,{x,y,px:x,py:y,t:1,trapped:0,climbOut:false});
+}
+function revealEscape(){ escapeShown=true; flashT=1; }
+let flashT=0;
+function levelClear(){ state='clear'; clearT=1.4; score+=1500; hud(); }
+function nextLevel(){
+  levelIdx++; if(levelIdx>=LEVELS.length){ levelIdx=0; loop++; }
+  loadLevel(); state='play';
+}
+function die(){ state='dying'; deathT=1.1; lives--; hud(); if(navigator.vibrate) try{navigator.vibrate(150)}catch(e){} }
+function afterDeath(){
+  if(lives<=0){ gameOver(); return; }
+  loadLevel(); state='play';
+}
+function gameOver(){
+  state='over';
+  const best=Math.max(store.get('best',0),score); store.set('best',best);
+  $('sheetTitle').textContent='Game over';
+  $('sheetText').textContent = score>=best && score>0 ? 'New best score!' : `Best score: ${best}`;
+  $('sheetScore').hidden=false; $('sheetScore').textContent=`${score} pts`;
+  $('startBtn').textContent='Play again'; $('sheet').hidden=false;
+}
+function newGame(){ levelIdx=0; loop=0; score=0; lives=5; loadLevel(); state='play'; $('sheet').hidden=true; }
+function hud(){ $('lvl').textContent=levelIdx+1+loop*LEVELS.length; $('gold').textContent=gold; $('score').textContent=score; $('lives').textContent=Math.max(0,lives); }
+
+// ---------- drawing ----------
+function drawTile(x,y){
+  const t=map[y][x], X=x*cell, Y=y*cell, c=cell;
+  if(t==='#'){
+    const h=holeAt(x,y);
+    if(h && h.fill===0){ // open hole, with crumbs while being dug
+      if(h.t<.25){ ctx.fillStyle='#b5532f'; ctx.fillRect(X,Y+c*(h.t/.25),c,c*(1-h.t/.25)); }
+      return;
+    }
+    const k = h ? h.fill : 1;
+    ctx.fillStyle='#b5532f'; ctx.fillRect(X,Y+c*(1-k),c,c*k);
+    ctx.fillStyle='#7d3218';
+    ctx.fillRect(X,Y+c*.5-1,c,2); ctx.fillRect(X,Y+c-2,c,2);
+    ctx.fillRect(X+c*.5-1,Y,2,c*.5); ctx.fillRect(X+c*.2-1,Y+c*.5,2,c*.5);
+    ctx.fillStyle='rgba(255,200,160,.18)'; ctx.fillRect(X,Y,c,2);
+  } else if(t==='@'){
+    ctx.fillStyle='#5b5668'; ctx.fillRect(X,Y,c,c);
+    ctx.fillStyle='#45404f'; ctx.fillRect(X+2,Y+2,c-4,c-4);
+    ctx.fillStyle='rgba(255,255,255,.12)'; ctx.fillRect(X+2,Y+2,c-4,2);
+  } else if(t==='H' || (t==='S'&&escapeShown)){
+    ctx.strokeStyle = t==='S' ? '#ffc83d' : '#c9b48a'; ctx.lineWidth=Math.max(2,c*.09);
+    ctx.beginPath(); ctx.moveTo(X+c*.2,Y); ctx.lineTo(X+c*.2,Y+c); ctx.moveTo(X+c*.8,Y); ctx.lineTo(X+c*.8,Y+c);
+    for(let i=0;i<3;i++){ ctx.moveTo(X+c*.2,Y+c*(.17+i*.33)); ctx.lineTo(X+c*.8,Y+c*(.17+i*.33)); }
+    ctx.stroke();
+  } else if(t==='-'){
+    ctx.strokeStyle='#d8d0c0'; ctx.lineWidth=Math.max(2,c*.08);
+    ctx.beginPath(); ctx.moveTo(X,Y+c*.12); ctx.lineTo(X+c,Y+c*.12); ctx.stroke();
+  } else if(t==='$'){
+    const sh=.5+.5*Math.sin(clock*4+x);
+    ctx.fillStyle='#c8901c'; ctx.beginPath(); ctx.moveTo(X+c*.15,Y+c*.92); ctx.lineTo(X+c*.5,Y+c*.45); ctx.lineTo(X+c*.85,Y+c*.92); ctx.closePath(); ctx.fill();
+    ctx.fillStyle='#ffc83d'; ctx.beginPath(); ctx.moveTo(X+c*.25,Y+c*.92); ctx.lineTo(X+c*.5,Y+c*.55); ctx.lineTo(X+c*.75,Y+c*.92); ctx.closePath(); ctx.fill();
+    ctx.fillStyle=`rgba(255,255,255,${.4+.5*sh})`; ctx.fillRect(X+c*.45,Y+c*.6,c*.08,c*.08);
+  }
+}
+function drawPerson(e,color,isGuard){
+  const x=(e.px+(e.x-e.px)*e.t)*cell, y=(e.py+(e.y-e.py)*e.t)*cell, c=cell;
+  const moving=e.t<1, ph=moving?Math.sin(clock*18):0;
+  const onLadder=isLadder(e.x,e.y)&&e.x===e.px, onBar=isBar(e.x,e.y);
+  const cx=x+c/2;
+  ctx.save();
+  ctx.strokeStyle=color; ctx.fillStyle=color; ctx.lineWidth=Math.max(2,c*.1); ctx.lineCap='round';
+  // head
+  ctx.beginPath(); ctx.arc(cx, y+c*.2, c*.14, 0, 7); ctx.fill();
+  if(isGuard){ ctx.fillStyle='#1b1626'; ctx.fillRect(cx-c*.14,y+c*.06,c*.28,c*.06); ctx.fillStyle=color; }
+  // body
+  ctx.beginPath(); ctx.moveTo(cx,y+c*.34); ctx.lineTo(cx,y+c*.64); ctx.stroke();
+  // arms
+  ctx.beginPath();
+  if(onBar){ ctx.moveTo(cx,y+c*.4); ctx.lineTo(cx-c*.2,y+c*.1); ctx.moveTo(cx,y+c*.4); ctx.lineTo(cx+c*.2,y+c*.1); }
+  else if(onLadder){ ctx.moveTo(cx,y+c*.42); ctx.lineTo(cx-c*.26,y+c*(.3+ph*.08)); ctx.moveTo(cx,y+c*.42); ctx.lineTo(cx+c*.26,y+c*(.3-ph*.08)); }
+  else { ctx.moveTo(cx,y+c*.42); ctx.lineTo(cx+c*.22*e.face,y+c*(.5+ph*.08)); ctx.moveTo(cx,y+c*.42); ctx.lineTo(cx-c*.18*e.face,y+c*(.52-ph*.08)); }
+  ctx.stroke();
+  // legs
+  ctx.beginPath();
+  ctx.moveTo(cx,y+c*.64); ctx.lineTo(cx+c*.18*ph,y+c*.95);
+  ctx.moveTo(cx,y+c*.64); ctx.lineTo(cx-c*.18*ph - (moving?0:c*.1),y+c*.95);
+  if(!moving){ ctx.moveTo(cx,y+c*.64); ctx.lineTo(cx+c*.1,y+c*.95); }
+  ctx.stroke();
+  // runner's pickaxe swing while digging
+  if(!isGuard && e.digT>0){ ctx.strokeStyle='#ffc83d'; ctx.beginPath(); ctx.moveTo(cx+c*.2*e.face,y+c*.5); ctx.lineTo(cx+c*.45*e.face,y+c*.9); ctx.stroke(); }
+  ctx.restore();
+}
+function draw(){
+  ctx.fillStyle='#0e0b14'; ctx.fillRect(0,0,W,H);
+  for(let y=0;y<ROWS;y++) for(let x=0;x<COLS;x++) drawTile(x,y);
+  for(const g of guards){
+    drawPerson(g,'#ff5d6c',true);
+    if(g.trapped>0){ ctx.fillStyle='rgba(255,255,255,.8)'; ctx.font=`${cell*.4}px Silkscreen, monospace`; ctx.textAlign='center'; ctx.fillText('!',(g.x+.5)*cell,g.y*cell+cell*.1); }
+  }
+  if(state==='dying'){
+    const k=1-deathT/1.1; ctx.globalAlpha=1-k; drawPerson(runner,'#5ad1ff',false); ctx.globalAlpha=1;
+    ctx.strokeStyle=`rgba(255,93,108,${1-k})`; ctx.lineWidth=3; ctx.beginPath(); ctx.arc((runner.x+.5)*cell,(runner.y+.5)*cell,cell*(.3+k),0,7); ctx.stroke();
+  } else if(state!=='menu') drawPerson(runner,'#5ad1ff',false);
+  if(flashT>0){ flashT-=1/60; ctx.fillStyle=`rgba(255,200,61,${flashT*.3})`; ctx.fillRect(0,0,W,H); }
+  if(state==='clear'){ ctx.fillStyle='rgba(14,11,20,.6)'; ctx.fillRect(0,0,W,H); ctx.fillStyle='#ffc83d'; ctx.font=`${cell*1.1}px Silkscreen, monospace`; ctx.textAlign='center'; ctx.fillText('LEVEL CLEAR',W/2,H/2); }
+}
+
+// ---------- input ----------
+const keyMap={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'};
+addEventListener('keydown',e=>{
+  if(keyMap[e.key]){ if(!held[keyMap[e.key]]) pendingDir=keyMap[e.key]; held[keyMap[e.key]]=1; e.preventDefault(); }
+  else if(e.key==='+'||e.key==='='){ setSpeed(1); e.preventDefault(); }
+  else if(e.key==='-'||e.key==='_'){ setSpeed(-1); e.preventDefault(); }
+  else if(e.key==='z'||e.key==='Z'){ dig(-1); e.preventDefault(); }
+  else if(e.key==='x'||e.key==='X'){ dig(1); e.preventDefault(); }
+  else if((e.key==='Enter'||e.key===' ') && (state==='menu'||state==='over')){ newGame(); e.preventDefault(); }
+});
+addEventListener('keyup',e=>{ if(keyMap[e.key]) held[keyMap[e.key]]=0; });
+// arrow pad: the finger can slide between arrows; a quick tap always moves one square
+const padEl=document.querySelector('.pad'), padBtns=[...padEl.querySelectorAll('button')];
+function padSet(dir){
+  for(const b of padBtns) b.classList.toggle('on', b.dataset.d===dir);
+  const was=Object.keys(held).find(k=>held[k]);
+  held={up:0,down:0,left:0,right:0};
+  if(dir){ held[dir]=1; if(dir!==was) pendingDir=dir; }
+}
+function padDirAt(x,y){
+  const el=document.elementFromPoint(x,y);
+  const b=el && el.closest && el.closest('.pad button');
+  if(b) return b.dataset.d;
+  const r=padEl.getBoundingClientRect(), cx=r.left+r.width/2, cy=r.top+r.height/2, dx=x-cx, dy=y-cy;
+  if(Math.hypot(dx,dy)<14) return null;
+  return Math.abs(dx)>Math.abs(dy) ? (dx>0?'right':'left') : (dy>0?'down':'up');
+}
+const touchOpts={passive:false};
+padEl.addEventListener('touchstart',e=>{ e.preventDefault(); const t=e.touches[e.touches.length-1]; padSet(padDirAt(t.clientX,t.clientY)); },touchOpts);
+padEl.addEventListener('touchmove',e=>{ e.preventDefault(); const t=e.touches[e.touches.length-1]; padSet(padDirAt(t.clientX,t.clientY)); },touchOpts);
+padEl.addEventListener('touchend',e=>{ e.preventDefault(); if(e.touches.length===0) padSet(null); },touchOpts);
+padEl.addEventListener('touchcancel',()=>padSet(null));
+// mouse fallback for desktop
+let mouseDown=false;
+padEl.addEventListener('mousedown',e=>{ mouseDown=true; padSet(padDirAt(e.clientX,e.clientY)); });
+addEventListener('mousemove',e=>{ if(mouseDown) padSet(padDirAt(e.clientX,e.clientY)); });
+addEventListener('mouseup',()=>{ if(mouseDown){ mouseDown=false; padSet(null); } });
+
+function bindTap(el,fn){
+  el.addEventListener('touchstart',e=>{ e.preventDefault(); el.classList.add('on'); fn(); },touchOpts);
+  el.addEventListener('touchend',e=>{ e.preventDefault(); el.classList.remove('on'); },touchOpts);
+  el.addEventListener('touchcancel',()=>el.classList.remove('on'));
+  el.addEventListener('mousedown',()=>{ el.classList.add('on'); fn(); });
+  el.addEventListener('mouseup',()=>el.classList.remove('on'));
+  el.addEventListener('mouseleave',()=>el.classList.remove('on'));
+}
+bindTap($('digL'),()=>dig(-1));
+bindTap($('digR'),()=>dig(1));
+function setSpeed(d){
+  speedIdx=Math.min(SPEEDS.length-1,Math.max(0,speedIdx+d));
+  try{localStorage.setItem('digrunner.speed2',JSON.stringify(speedIdx))}catch(e){}
+  showSpeed();
+}
+function showSpeed(){
+  $('spd').textContent=(+SPEEDS[speedIdx].toFixed(2))+'×';
+  $('spdDn').disabled=speedIdx===0; $('spdUp').disabled=speedIdx===SPEEDS.length-1;
+}
+bindTap($('spdDn'),()=>setSpeed(-1));
+bindTap($('spdUp'),()=>setSpeed(1));
+showSpeed();
+addEventListener('blur',()=>{ held={up:0,down:0,left:0,right:0}; });
+
+// ---------- sizing & loop ----------
+function fit(){
+  const st=$('stage').getBoundingClientRect();
+  cell=Math.floor(Math.min(st.width/COLS, st.height/ROWS));
+  W=cell*COLS; H=cell*ROWS;
+  const dpr=window.devicePixelRatio||1;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+}
+addEventListener('resize',fit);
+let last=performance.now();
+function frame(now){
+  const dt=Math.min(.05,(now-last)/1000)*SPEEDS[speedIdx]; last=now;
+  // split big steps so fast speeds stay accurate
+  const n=Math.ceil(dt/0.02); for(let i=0;i<n;i++) update(dt/n);
+  draw(); requestAnimationFrame(frame);
+}
+$('startBtn').onclick=newGame;
+loadLevel(); fit(); requestAnimationFrame(frame);
+})();
+</script>
+
+</body></html>
